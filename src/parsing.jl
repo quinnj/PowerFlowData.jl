@@ -39,22 +39,22 @@ function parse_network(source)
     pos = next_line(bytes, pos, len)
     @debug "comments" pos
 
-    nrows = count_nrow(bytes, pos, len, OPTIONS)
-    @debug "buses" nrows pos
-    buses, pos = parse_records!(Buses(nrows), bytes, pos, len, OPTIONS, EOL_OPTIONS)
+    @debug "buses" pos
+    buses, pos = parse_records!(Buses(), bytes, pos, len, OPTIONS, EOL_OPTIONS)
 
-    nrows = count_nrow(bytes, pos, len, OPTIONS)
-    @debug "loads" nrows pos
-    loads, pos = parse_records!(Loads(nrows), bytes, pos, len, OPTIONS, EOL_OPTIONS)
+    sizehint = length(buses)
+    @debug "loads" pos sizehint
+    loads, pos = parse_records!(Loads(sizehint), bytes, pos, len, OPTIONS, EOL_OPTIONS)
 
-    nrows = count_nrow(bytes, pos, len, OPTIONS)
-    @debug "gens" nrows pos
-    gens, pos = parse_records!(Generators(nrows), bytes, pos, len, OPTIONS, EOL_OPTIONS)
+    sizehint = length(loads)
+    @debug "gens" pos sizehint
+    gens, pos = parse_records!(Generators(sizehint), bytes, pos, len, OPTIONS, EOL_OPTIONS)
 
-    nrows = count_nrow(bytes, pos, len, OPTIONS)
-    @debug "branches" nrows pos
-    branches, pos = parse_records!(Branches(nrows), bytes, pos, len, OPTIONS, EOL_OPTIONS)
+    sizehint = length(gens)
+    @debug "branches" pos sizehint
+    branches, pos = parse_records!(Branches(sizehint), bytes, pos, len, OPTIONS, EOL_OPTIONS)
 
+    @debug "sizes" length(buses) length(loads) length(gens) length(branches)
     return Network(caseid, buses, loads, gens, branches)
 end
 
@@ -84,9 +84,9 @@ function parse_caseid(bytes, pos, len, options)
 end
 
 function parse_records!(rec::R, bytes, pos, len, options, eol_options)::Tuple{R, Int} where {R <: Records}
-    nrows = length(getfield(rec, 1))
-    nrows == 0 && return rec, pos
-    for row in 1:nrows
+    row = 1
+    # Data input is terminated by specifying a bus number of zero.
+    while !(eof(bytes, pos, len) || peekbyte(bytes, pos) == UInt8('0'))
         pos, code = parse_row!(rec, row, bytes, pos, len, options, eol_options)
 
         # Because we're working around end-of-line comments,
@@ -94,13 +94,9 @@ function parse_records!(rec::R, bytes, pos, len, options, eol_options)::Tuple{R,
         if !newline(code)
             pos = next_line(bytes, pos, len)
         end
+        row += 1
     end
-
-    # Data input is terminated by specifying a bus number of zero.
-    # @assert peekbyte(bytes, pos) == UInt8('0')
-    if !(eof(bytes, pos, len) || peekbyte(bytes, pos) == UInt8('0'))
-        @warn "Not at end of $(typeof(rec)) records"
-    end
+    # Move past a "0 bus" line.
     pos = next_line(bytes, pos, len)
     return rec, pos
 end
@@ -149,8 +145,7 @@ function parse_row!(rec::Records, row::Int, bytes, pos, len, options, eol_option
         eltyp = eltype(fieldtype(typeof(rec), col))
         opts = ifelse(col == ncols, eol_options, options)
         val, pos, code = parse_value(eltyp, bytes, pos, len, opts)
-        @inbounds getfield(rec, col)[row] = val
-
+        push!(getfield(rec, col), val)
         @debug codes(code) row col pos newline=newline(code)
     end
     return pos, code
